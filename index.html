@@ -1015,6 +1015,27 @@ let allNews = [];
 let currentView = 'card';
 let pdfText = null;
 let currentEditId = null;
+let fallbackApiKey = ''; // Fallback if localStorage is blocked
+
+// ─── Safe Storage Wrapper ────────────────────────────────
+function safeSetItem(key, val) {
+  try {
+    localStorage.setItem(key, val);
+    return true;
+  } catch (e) {
+    console.warn('Storage blocked: Using in-memory fallback.', e);
+    return false;
+  }
+}
+
+function safeGetItem(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    console.warn('Storage blocked: Reading in-memory fallback.', e);
+    return null;
+  }
+}
 
 // ─── Initialize ──────────────────────────────────────────
 window.onload = function() {
@@ -1025,23 +1046,30 @@ window.onload = function() {
 
 // ─── API Key Management ──────────────────────────────────
 function loadApiKey() {
-  const key = localStorage.getItem('gemini_api_key') || '';
+  const key = safeGetItem('gemini_api_key') || fallbackApiKey || '';
   document.getElementById('apiKeyInput').value = key;
   return key;
 }
 
 function saveSettings() {
   const key = document.getElementById('apiKeyInput').value.trim();
-  localStorage.setItem('gemini_api_key', key);
+  fallbackApiKey = key;
+  const saved = safeSetItem('gemini_api_key', key);
+  
   closeSettingsModal();
   checkApiStatus();
-  alert('บันทึก API Key เรียบร้อยแล้ว');
+  
+  if (saved) {
+    alert('บันทึก API Key เรียบร้อยแล้ว');
+  } else {
+    alert('บันทึก API Key สำเร็จในเซสชันนี้ (แต่ไม่สามารถบันทึกถาวรได้เนื่องจากความปลอดภัยของเบราว์เซอร์สำหรับไฟล์เครื่อง)');
+  }
 }
 
 function checkApiStatus() {
-  const key = localStorage.getItem('gemini_api_key');
+  const key = safeGetItem('gemini_api_key') || fallbackApiKey || '';
   const badge = document.getElementById('apiStatus');
-  if (key && key.startsWith('AIzaSy')) {
+  if (key && key.length > 10) {
     badge.className = 'api-badge';
     badge.textContent = '🟢 Gemini Key พร้อมใช้งาน';
   } else {
@@ -1053,7 +1081,7 @@ function checkApiStatus() {
 // ─── Storage ─────────────────────────────────────────────
 function loadFromStorage() {
   try {
-    const raw = localStorage.getItem('magazine_news_v3');
+    const raw = safeGetItem('magazine_news_v3');
     if (raw) {
       allNews = JSON.parse(raw);
     }
@@ -1067,11 +1095,12 @@ function loadFromStorage() {
 
 function saveToStorage() {
   try {
-    localStorage.setItem('magazine_news_v3', JSON.stringify(allNews));
+    safeSetItem('magazine_news_v3', JSON.stringify(allNews));
   } catch(e) { 
     console.error('Save error', e); 
   }
 }
+
 
 // ─── Modals ──────────────────────────────────────────────
 function openSettingsModal() { document.getElementById('settingsModal').classList.add('show'); }
@@ -1138,8 +1167,8 @@ async function handleFile(file) {
 
 // ─── Extraction via Gemini API ─────────────────────────────
 async function startExtraction() {
-  const apiKey = localStorage.getItem('gemini_api_key');
-  if (!apiKey || !apiKey.startsWith('AIzaSy')) {
+  const apiKey = safeGetItem('gemini_api_key') || fallbackApiKey || '';
+  if (!apiKey || apiKey.length < 10) {
     alert('กรุณาคลิกตั้งค่าที่มุมขวาบนเพื่อกรอก Gemini API Key ก่อนใช้งานครับ');
     openSettingsModal();
     return;
