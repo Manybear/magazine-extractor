@@ -847,7 +847,12 @@
     <div class="panel" style="margin-top:20px">
       <div class="panel-header">
         <div class="panel-title"><span class="dot" style="background:var(--gold); box-shadow: 0 0 8px var(--gold);"></span>ฉบับที่มีในระบบ</div>
-        <button class="btn btn-sm btn-ghost" onclick="clearAll()" style="color:var(--danger)">ล้างทั้งหมด</button>
+        <div style="display: flex; gap: 4px;">
+          <button class="btn btn-sm btn-ghost" onclick="backupData()" title="สำรองข้อมูลเป็นไฟล์ JSON" style="padding: 4px 8px;">📥 สำรอง</button>
+          <button class="btn btn-sm btn-ghost" onclick="triggerImport()" title="นำเข้าข้อมูลจากไฟล์ JSON" style="padding: 4px 8px;">📤 นำเข้า</button>
+          <input type="file" id="importInput" accept=".json" style="display:none" onchange="importData(event)">
+          <button class="btn btn-sm btn-ghost" onclick="clearAll()" style="color:var(--danger); padding: 4px 8px;">🗑 ลบทั้งหมด</button>
+        </div>
       </div>
       <div class="panel-body" style="padding:16px">
         <div id="issueList" style="font-size:13px; color:var(--text-muted)">— ยังไม่มีข้อมูลในระบบ —</div>
@@ -888,9 +893,12 @@
       <div class="view-toggle">
         <button class="view-btn active" id="vCard" onclick="setView('card')">🃏 การ์ด</button>
         <button class="view-btn" id="vTable" onclick="setView('table')">📊 ตาราง</button>
+        <button class="view-btn" id="vChart" onclick="setView('chart')">📈 กราฟ</button>
       </div>
-      <div class="export-group" style="display: flex; gap: 8px;">
-        <button class="btn btn-sm btn-ghost" onclick="exportExcel()">⬇️ ส่งออก Excel (.xlsx)</button>
+      <div class="export-group" style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn btn-sm btn-ghost" onclick="exportExcel()">⬇️ Excel</button>
+        <button class="btn btn-sm btn-ghost" onclick="printFiltered()">🖨️ พิมพ์รายการปัจจุบัน</button>
+        <button class="btn btn-sm btn-primary" onclick="openAddModal()" style="margin:0; height: 38px; line-height: 1;">➕ เพิ่มข่าวเอง</button>
       </div>
     </div>
 
@@ -909,12 +917,32 @@
 <div class="modal-overlay" id="editModal">
   <div class="modal-box">
     <div class="modal-head">
-      <h3>✎ แก้ไขรายละเอียดข่าว</h3>
+      <h3 id="modalTitle">✎ แก้ไขรายละเอียดข่าว</h3>
       <button class="modal-close" onclick="closeEditModal()">✕</button>
     </div>
     <div class="modal-body">
       <input type="hidden" id="editId">
-      <div class="field-group" style="margin-top:0">
+      <div class="field-row" id="modalIssueRow">
+        <div class="field-group" style="margin-top:0">
+          <label>นิตยสารฉบับที่</label>
+          <input type="number" id="editIssueNum" placeholder="เช่น 425">
+        </div>
+        <div class="field-group" style="margin-top:0">
+          <label>ประจำเดือน/ปี พ.ศ.</label>
+          <div style="display:flex; gap:8px;">
+            <select id="editIssueMonth" style="flex:1;">
+              <option>มกราคม</option><option>กุมภาพันธ์</option>
+              <option>มีนาคม</option><option>เมษายน</option>
+              <option selected>พฤษภาคม</option><option>มิถุนายน</option>
+              <option>กรกฎาคม</option><option>สิงหาคม</option>
+              <option>กันยายน</option><option>ตุลาคม</option>
+              <option>พฤศจิกายน</option><option>ธันวาคม</option>
+            </select>
+            <input type="number" id="editIssueYear" placeholder="2569" style="width: 90px;" value="2569">
+          </div>
+        </div>
+      </div>
+      <div class="field-group">
         <label>พาดหัวข่าว/บทความ</label>
         <input type="text" id="editHeadline">
       </div>
@@ -1005,6 +1033,7 @@
 <!-- Libraries via CDN -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
 // Configure pdf.js worker
@@ -1377,6 +1406,7 @@ function setView(v) {
   currentView = v;
   document.getElementById('vCard').classList.toggle('active', v === 'card');
   document.getElementById('vTable').classList.toggle('active', v === 'table');
+  document.getElementById('vChart').classList.toggle('active', v === 'chart');
   renderNews();
 }
 
@@ -1395,9 +1425,99 @@ function renderNews() {
 
   if (currentView === 'table') {
     renderTable(items, container);
+  } else if (currentView === 'chart') {
+    renderCharts(items, container);
   } else {
     renderCards(items, container);
   }
+}
+
+function renderCharts(items, container) {
+  container.innerHTML = `
+    <div class="chart-panel" style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; box-shadow:0 4px 16px rgba(0,0,0,0.2); margin-bottom: 24px;">
+      <div class="chart-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:24px;">
+        <div>
+          <h3 style="font-size:13px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:16px;">📊 จำนวนข่าวแบ่งตามคอลัมน์</h3>
+          <div style="position:relative; height:280px;"><canvas id="columnChart"></canvas></div>
+        </div>
+        <div>
+          <h3 style="font-size:13px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:16px;">🏢 5 อันดับบริษัทที่เป็นข่าวบ่อยสุด</h3>
+          <div style="position:relative; height:280px;"><canvas id="companyChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Calculate chart data
+  const cols = {};
+  const cos = {};
+  items.forEach(n => {
+    cols[n.column] = (cols[n.column] || 0) + 1;
+    if (n.company) cos[n.company] = (cos[n.company] || 0) + 1;
+  });
+
+  const colLabels = Object.keys(cols);
+  const colValues = Object.values(cols);
+
+  const topCos = Object.entries(cos)
+    .sort((a,b) => b[1] - a[1])
+    .slice(0, 5);
+  const coLabels = topCos.map(c => c[0]);
+  const coValues = topCos.map(c => c[1]);
+
+  new Chart(document.getElementById('columnChart'), {
+    type: 'doughnut',
+    data: {
+      labels: colLabels.length > 0 ? colLabels : ['ไม่มีข้อมูล'],
+      datasets: [{
+        data: colValues.length > 0 ? colValues : [1],
+        backgroundColor: ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16'],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#94a3b8', font: { family: 'Sarabun', size: 11 } }
+        }
+      }
+    }
+  });
+
+  new Chart(document.getElementById('companyChart'), {
+    type: 'bar',
+    data: {
+      labels: coLabels.length > 0 ? coLabels : ['ไม่มีข้อมูลบริษัท'],
+      datasets: [{
+        label: 'จำนวนข่าว',
+        data: coValues.length > 0 ? coValues : [0],
+        backgroundColor: 'rgba(59, 130, 246, 0.6)',
+        borderColor: '#3b82f6',
+        borderWidth: 1,
+        borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false }
+      },
+      scales: {
+        y: {
+          ticks: { color: '#94a3b8', stepSize: 1, font: { family: 'Sarabun', size: 10 } },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        x: {
+          ticks: { color: '#94a3b8', font: { family: 'Sarabun', size: 10 } },
+          grid: { display: false }
+        }
+      }
+    }
+  });
 }
 
 function renderCards(items, container) {
@@ -1540,18 +1660,45 @@ function clearAll() {
   renderIssueList();
 }
 
-// ─── Edit Modal Operations ───────────────────────────────
+// ─── Edit / Add Modal Operations ─────────────────────────
+function openAddModal() {
+  currentEditId = null;
+  document.getElementById('editId').value = '';
+  document.getElementById('modalTitle').textContent = '➕ เพิ่มข่าวด้วยตนเอง';
+  
+  // Try to prefill with currently typed left panel values
+  document.getElementById('editIssueNum').value = document.getElementById('issueNum').value || '';
+  document.getElementById('editIssueMonth').value = document.getElementById('issueMonth').value || 'พฤษภาคม';
+  document.getElementById('editIssueYear').value = document.getElementById('issueYear').value || '2569';
+  
+  document.getElementById('editHeadline').value = '';
+  document.getElementById('editColumn').value = '';
+  document.getElementById('editPage').value = '';
+  document.getElementById('editCompany').value = '';
+  document.getElementById('editPerson').value = '';
+  document.getElementById('editSummary').value = '';
+  
+  document.getElementById('editModal').classList.add('show');
+}
+
 function openEditModal(id) {
   const item = allNews.find(n => n.id === id);
   if (!item) return;
   currentEditId = id;
   document.getElementById('editId').value = id;
+  document.getElementById('modalTitle').textContent = '✎ แก้ไขรายละเอียดข่าว';
+  
+  document.getElementById('editIssueNum').value = item.issueNum || '';
+  document.getElementById('editIssueMonth').value = item.issueMonth || 'พฤษภาคม';
+  document.getElementById('editIssueYear').value = item.issueYear || '2569';
+  
   document.getElementById('editHeadline').value = item.headline;
   document.getElementById('editColumn').value = item.column;
   document.getElementById('editPage').value = item.page;
   document.getElementById('editCompany').value = item.company;
   document.getElementById('editPerson').value = item.person;
   document.getElementById('editSummary').value = item.summary;
+  
   document.getElementById('editModal').classList.add('show');
 }
 
@@ -1561,21 +1708,154 @@ function closeEditModal() {
 }
 
 function saveEditModal() {
-  if (!currentEditId) return;
-  const item = allNews.find(n => n.id === currentEditId);
-  if (item) {
-    item.headline = document.getElementById('editHeadline').value.trim() || '—';
-    item.column = document.getElementById('editColumn').value.trim() || '—';
-    item.page = document.getElementById('editPage').value.trim() || '—';
-    item.company = document.getElementById('editCompany').value.trim();
-    item.person = document.getElementById('editPerson').value.trim();
-    item.summary = document.getElementById('editSummary').value.trim();
-    
-    saveToStorage();
-    updateStats();
-    renderNews();
-    closeEditModal();
+  const headline = document.getElementById('editHeadline').value.trim() || '—';
+  const column = document.getElementById('editColumn').value.trim() || '—';
+  const page = document.getElementById('editPage').value.trim() || '—';
+  const company = document.getElementById('editCompany').value.trim();
+  const person = document.getElementById('editPerson').value.trim();
+  const summary = document.getElementById('editSummary').value.trim();
+  
+  const issueNum = document.getElementById('editIssueNum').value.trim() || '—';
+  const issueMonth = document.getElementById('editIssueMonth').value || '—';
+  const issueYear = document.getElementById('editIssueYear').value.trim() || '—';
+  const issueLabel = `ฉบับที่ ${issueNum} ${issueMonth} ${issueYear}`;
+  const issueId = `${issueNum}_${issueYear}`;
+
+  if (currentEditId) {
+    // Edit existing
+    const item = allNews.find(n => n.id === currentEditId);
+    if (item) {
+      item.headline = headline;
+      item.column = column;
+      item.page = page;
+      item.company = company;
+      item.person = person;
+      item.summary = summary;
+      item.issueNum = issueNum;
+      item.issueMonth = issueMonth;
+      item.issueYear = issueYear;
+      item.issueLabel = issueLabel;
+      item.issueId = issueId;
+    }
+  } else {
+    // Create new manual item
+    const newItem = {
+      id: `${issueId}_manual_${Date.now()}`,
+      issueId, issueLabel, issueNum, issueMonth, issueYear,
+      extractedAt: new Date().toISOString(),
+      headline, column, page, company, person, summary
+    };
+    allNews.unshift(newItem);
   }
+  
+  saveToStorage();
+  updateStats();
+  renderNews();
+  renderIssueList();
+  closeEditModal();
+}
+
+// ─── Backup & Import Operations ──────────────────────────
+function backupData() {
+  if (allNews.length === 0) return alert('ไม่มีข้อมูลในระบบสำหรับสำรองข้อมูล');
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(allNews, null, 2));
+  const dlAnchorElem = document.createElement('a');
+  dlAnchorElem.setAttribute("href", dataStr);
+  dlAnchorElem.setAttribute("download", `magazine_backup_${new Date().toISOString().slice(0,10)}.json`);
+  dlAnchorElem.click();
+}
+
+function triggerImport() {
+  document.getElementById('importInput').click();
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const imported = JSON.parse(e.target.result);
+      if (!Array.isArray(imported)) {
+        throw new Error('โครงสร้างไฟล์ไม่ถูกต้อง (ต้องเป็น Array)');
+      }
+      
+      const confirmMerge = confirm(`ตรวจพบข้อมูลจำนวน ${imported.length} ข่าว\n\nคุณต้องการนำมารวมกับข้อมูลปัจจุบัน (กด ตกลง) หรือต้องการเขียนทับลบข้อมูลเดิมทั้งหมด (กด ยกเลิก)?`);
+      
+      if (confirmMerge) {
+        // Merge - unique by ID
+        const map = {};
+        allNews.forEach(n => { map[n.id] = n; });
+        imported.forEach(n => { map[n.id] = n; });
+        allNews = Object.values(map);
+      } else {
+        const overwrite = confirm('คำเตือน! คุณกำลังจะลบข้อมูลปัจจุบันและเขียนทับด้วยข้อมูลนำเข้า ใช่หรือไม่?');
+        if (overwrite) {
+          allNews = imported;
+        } else {
+          return;
+        }
+      }
+      
+      saveToStorage();
+      updateStats();
+      renderNews();
+      renderIssueList();
+      alert('นำเข้าข้อมูลสำเร็จแล้ว!');
+    } catch(err) {
+      alert('ไม่สามารถนำเข้าข้อมูลได้: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = ''; // Reset file input
+}
+
+// ─── Print Filtered Current Items ────────────────────────
+function printFiltered() {
+  const items = filterNews();
+  if (items.length === 0) return alert('ไม่มีรายการข่าวในตัวกรองปัจจุบันให้พิมพ์');
+
+  let html = `
+    <div class="p-title">รายงานสรุปข้อมูลข่าวสารและบทความนิตยสาร</div>
+    <div class="p-sub">แสดงรายการตามการค้นหา/ตัวกรองปัจจุบัน | ข้อมูล ณ วันที่ ${new Date().toLocaleDateString('th-TH')} (ทั้งหมด ${items.length} ข่าว)</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 130px;">นิตยสารฉบับ</th>
+          <th style="width: 50px;">หน้า</th>
+          <th style="width: 130px;">คอลัมน์</th>
+          <th>หัวข้อข่าว / สรุปย่อ</th>
+          <th style="width: 140px;">บริษัท</th>
+          <th style="width: 110px;">บุคคลในข่าว</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  items.forEach(n => {
+    html += `
+      <tr>
+        <td style="font-weight: bold;">${esc(n.issueLabel)}</td>
+        <td style="text-align: center; font-weight: bold;">p.${n.page}</td>
+        <td>${esc(n.column)}</td>
+        <td>
+          <div style="font-weight: bold; margin-bottom: 4px;">${esc(n.headline)}</div>
+          <div style="font-size: 11px; color: #444;">${esc(n.summary)}</div>
+        </td>
+        <td>${n.company ? esc(n.company) : '—'}</td>
+        <td>${n.person ? esc(n.person) : '—'}</td>
+      </tr>
+    `;
+  });
+
+  html += `
+      </tbody>
+    </table>
+  `;
+
+  document.getElementById('printArea').innerHTML = html;
+  window.print();
 }
 
 // ─── Export to Excel (.xlsx) ──────────────────────────────
